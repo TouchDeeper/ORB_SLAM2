@@ -404,9 +404,12 @@ int MapPoint::PredictScale(const float &currentDist, Frame* pF)
     float ratio;
     {
         unique_lock<mutex> lock(mMutexPos);
+        //mfMaxDistance = ref_dist*levelScaleFractor为参考帧考虑上尺度后的距离
+        //ratio = 麻烦MaxDistance/CurrentDist = ref_dist/cur_dist
         ratio = mfMaxDistance/currentDist;
     }
 
+    //何时取log线性化
     int nScale = ceil(log(ratio)/pF->mfLogScaleFactor);
     if(nScale<0)
         nScale = 0;

@@ -37,7 +37,7 @@ public:
     void DivideNode(ExtractorNode &n1, ExtractorNode &n2, ExtractorNode &n3, ExtractorNode &n4);
 
     std::vector<cv::KeyPoint> vKeys;
-    cv::Point2i UL, UR, BL, BR;
+    cv::Point2i UL, UR, BL, BR;//upleft,upright,bottomleft,bottomright
     std::list<ExtractorNode>::iterator lit;
     bool bNoMore;
 };
@@ -86,25 +86,29 @@ public:
 
 protected:
 
+    //计算图像金字塔
     void ComputePyramid(cv::Mat image);
+    //通过四叉树的方式计算特征点
     void ComputeKeyPointsOctTree(std::vector<std::vector<cv::KeyPoint> >& allKeypoints);    
     std::vector<cv::KeyPoint> DistributeOctTree(const std::vector<cv::KeyPoint>& vToDistributeKeys, const int &minX,
                                            const int &maxX, const int &minY, const int &maxY, const int &nFeatures, const int &level);
 
     void ComputeKeyPointsOld(std::vector<std::vector<cv::KeyPoint> >& allKeypoints);
-    std::vector<cv::Point> pattern;
 
-    int nfeatures;
-    double scaleFactor;
-    int nlevels;
-    int iniThFAST;
-    int minThFAST;
+    std::vector<cv::Point> pattern;    //用于存放训练的模板
 
-    std::vector<int> mnFeaturesPerLevel;
+    int nfeatures;//最多提取的特征点数
+    double scaleFactor;//金字塔之间的尺度参数
+    int nlevels;//金字塔层数
+    /*为了防止使用默认设置的阈值提取不到角点,又设置了一个最小的角点阈值,保证检测到足够数量的特征点*/
+    int iniThFAST;//默认设置的角点阈值
+    int minThFAST;//最小角点阈值
 
-    std::vector<int> umax;
+    std::vector<int> mnFeaturesPerLevel;//每层特征的个数
 
-    std::vector<float> mvScaleFactor;
+    std::vector<int> umax;//用于存储计算特征方向时,图像每个v坐标对应最大的u坐标
+
+    std::vector<float> mvScaleFactor;//存储每层的尺度因子
     std::vector<float> mvInvScaleFactor;    
     std::vector<float> mvLevelSigma2;
     std::vector<float> mvInvLevelSigma2;

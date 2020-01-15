@@ -41,6 +41,7 @@ Initializer::Initializer(const Frame &ReferenceFrame, float sigma, int iteration
     mMaxIterations = iterations;
 }
 
+    //同时计算本质矩阵和单应矩阵并从中选择一个模型
 bool Initializer::Initialize(const Frame &CurrentFrame, const vector<int> &vMatches12, cv::Mat &R21, cv::Mat &t21,
                              vector<cv::Point3f> &vP3D, vector<bool> &vbTriangulated)
 {
@@ -75,6 +76,8 @@ bool Initializer::Initialize(const Frame &CurrentFrame, const vector<int> &vMatc
     }
 
     // Generate sets of 8 points for each RANSAC iteration
+    //默认迭代次数为200,sigma=0.1
+    //针对8个点进行ransac
     mvSets = vector< vector<size_t> >(mMaxIterations,vector<size_t>(8,0));
 
     DUtils::Random::SeedRandOnce(0);
@@ -89,8 +92,9 @@ bool Initializer::Initialize(const Frame &CurrentFrame, const vector<int> &vMatc
             int randi = DUtils::Random::RandomInt(0,vAvailableIndices.size()-1);
             int idx = vAvailableIndices[randi];
 
-            mvSets[it][j] = idx;
+            mvSets[it][j] = idx;//随机取8个mvMatches12的id作为ransac的初始内点集
 
+            //选中一次就删除,防止重复选中,开启新一轮循环时会再次初始化
             vAvailableIndices[randi] = vAvailableIndices.back();
             vAvailableIndices.pop_back();
         }
@@ -129,6 +133,7 @@ void Initializer::FindHomography(vector<bool> &vbMatchesInliers, float &score, c
     // Normalize coordinates
     vector<cv::Point2f> vPn1, vPn2;
     cv::Mat T1, T2;
+    //0均值标准化
     Normalize(mvKeys1,vPn1, T1);
     Normalize(mvKeys2,vPn2, T2);
     cv::Mat T2inv = T2.inv();
@@ -152,11 +157,12 @@ void Initializer::FindHomography(vector<bool> &vbMatchesInliers, float &score, c
         {
             int idx = mvSets[it][j];
 
-            vPn1i[j] = vPn1[mvMatches12[idx].first];
-            vPn2i[j] = vPn2[mvMatches12[idx].second];
+            vPn1i[j] = vPn1[mvMatches12[idx].first];//第一个参数是帧1中的特征点id
+            vPn2i[j] = vPn2[mvMatches12[idx].second];//第二个参数是帧2中的特征点id
         }
 
         cv::Mat Hn = ComputeH21(vPn1i,vPn2i);
+        //因为Hn是用0均值标准化后的特征点计算的,要想适用于普通的特征点,需要对其进行变换
         H21i = T2inv*Hn*T1;
         H12i = H21i.inv();
 
@@ -634,7 +640,7 @@ bool Initializer::ReconstructH(vector<bool> &vbMatchesInliers, cv::Mat &H21, cv:
         tp*=d1-d3;
 
         cv::Mat t = U*tp;
-        vt.push_back(t/cv::norm(t));
+        vt.push_back(t/cv::norm(t));//为什么还要归一化???
 
         cv::Mat np(3,1,CV_32F);
         np.at<float>(0)=x1[i];
@@ -642,7 +648,7 @@ bool Initializer::ReconstructH(vector<bool> &vbMatchesInliers, cv::Mat &H21, cv:
         np.at<float>(2)=x3[i];
 
         cv::Mat n = V*np;
-        if(n.at<float>(2)<0)
+        if(n.at<float>(2)<0)//这是为什么???一定要Z>0的方向吗???
             n=-n;
         vn.push_back(n);
     }
@@ -695,6 +701,7 @@ bool Initializer::ReconstructH(vector<bool> &vbMatchesInliers, cv::Mat &H21, cv:
 
     // Instead of applying the visibility constraints proposed in the Faugeras' paper (which could fail for points seen with low parallax)
     // We reconstruct all hypotheses and check in terms of triangulated points and parallax
+    //
     for(size_t i=0; i<8; i++)
     {
         float parallaxi;
@@ -746,6 +753,7 @@ void Initializer::Triangulate(const cv::KeyPoint &kp1, const cv::KeyPoint &kp2, 
     x3D = x3D.rowRange(0,3)/x3D.at<float>(3);
 }
 
+    //归一化
 void Initializer::Normalize(const vector<cv::KeyPoint> &vKeys, vector<cv::Point2f> &vNormalizedPoints, cv::Mat &T)
 {
     float meanX = 0;
@@ -823,7 +831,7 @@ int Initializer::CheckRT(const cv::Mat &R, const cv::Mat &t, const vector<cv::Ke
     t.copyTo(P2.rowRange(0,3).col(3));
     P2 = K*P2;
 
-    cv::Mat O2 = -R.t()*t;
+    cv::Mat O2 = -R.t()*t;//这里传入的R和t是1在2中的,所以要取逆
 
     int nGood=0;
 
@@ -897,7 +905,7 @@ int Initializer::CheckRT(const cv::Mat &R, const cv::Mat &t, const vector<cv::Ke
     {
         sort(vCosParallax.begin(),vCosParallax.end());
 
-        size_t idx = min(50,int(vCosParallax.size()-1));
+        size_t idx = min(50,int(vCosParallax.size()-1));//这是什么策略???
         parallax = acos(vCosParallax[idx])*180/CV_PI;
     }
     else

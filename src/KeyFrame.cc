@@ -323,6 +323,7 @@ void KeyFrame::UpdateConnections()
     if(KFcounter.empty())
         return;
 
+    //当前关键帧根据共视MapPoints的数量来选择主要的相连关键帧
     //If the counter is greater than threshold add connection
     //In case no keyframe counter is over threshold add the one with maximum counter
     int nmax=0;
@@ -365,8 +366,8 @@ void KeyFrame::UpdateConnections()
 
         // mspConnectedKeyFrames = spConnectedKeyFrames;
         mConnectedKeyFrameWeights = KFcounter;
-        mvpOrderedConnectedKeyFrames = vector<KeyFrame*>(lKFs.begin(),lKFs.end());
-        mvOrderedWeights = vector<int>(lWs.begin(), lWs.end());
+        mvpOrderedConnectedKeyFrames = vector<KeyFrame*>(lKFs.begin(),lKFs.end());//已经筛选过的共视程度较高的关键帧
+        mvOrderedWeights = vector<int>(lWs.begin(), lWs.end());//已经筛选过的关键帧的counter
 
         if(mbFirstConnection && mnId!=0)
         {

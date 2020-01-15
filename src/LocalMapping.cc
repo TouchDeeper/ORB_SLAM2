@@ -52,38 +52,55 @@ void LocalMapping::Run()
     while(1)
     {
         // Tracking will see that Local Mapping is busy
+        //告诉tracking线程,LocalMapping线程正处于繁忙状态
+        //LocalMapping线程处理的关键帧都是Tracking线程发过来的:tracking线程中的
+        // creatNewKeyFrames会在mlNewKeyFrames插入关键帧
+        //在LocalMapping线程还没有处理完关键帧之前Tracking线程最好不要发送太快
         SetAcceptKeyFrames(false);
 
         // Check if there are keyframes in the queue
         if(CheckNewKeyFrames())
         {
             // BoW conversion and insertion in Map
+            //VI-A keyframe insertion
+            //计算关键帧特征点的BOW映射,将关键帧插入地图
             ProcessNewKeyFrame();
 
             // Check recent MapPoints
+            //VI-B:剔除ProcessNewKeyFrame函数中引入的不合格MapPoints
             MapPointCulling();
 
             // Triangulate new MapPoints
+            //VI-C:相机运动过程中与相邻关键帧通过三角化恢复出一些MapPoints
             CreateNewMapPoints();
-
+            //已经处理完队列中的最后一个关键帧
             if(!CheckNewKeyFrames())
             {
                 // Find more matches in neighbor keyframes and fuse point duplications
+                //检查并融合当前关键帧与相邻帧(两级相邻)重复的MapPoints
                 SearchInNeighbors();
             }
 
             mbAbortBA = false;
 
+            //已经处理完队列中的最后一个关键帧,并且闭环检测没有请求停止LocalMapping
             if(!CheckNewKeyFrames() && !stopRequested())
             {
-                // Local BA
+                // VI-D:Local BA
                 if(mpMap->KeyFramesInMap()>2)
                     Optimizer::LocalBundleAdjustment(mpCurrentKeyFrame,&mbAbortBA, mpMap);
 
                 // Check redundant local Keyframes
+                //VI-E:local KeyFrame culling
+                //检测并剔除当前帧相邻的关键帧中冗余的关键帧
+                //剔除的标准是:该关键帧的90%MapPoints可以被其他关键帧观测到
+                //trick!
+                //Tracking中先把关键帧交给LocalMapping线程
+                //并且在Tracking中InsertKyeFrame函数的条件比较松,交给LocalMapping线程的关键帧会比较密
+                //在这里再剔除冗余的关键帧
                 KeyFrameCulling();
             }
-
+            //将当前帧加入到闭环检测队列中
             mpLoopCloser->InsertKeyFrame(mpCurrentKeyFrame);
         }
         else if(Stop())
@@ -127,16 +144,22 @@ bool LocalMapping::CheckNewKeyFrames()
 
 void LocalMapping::ProcessNewKeyFrame()
 {
+    //步骤1:从缓冲队列中取出一帧关键帧
+    //Tracking线程向LocalMapping中插入关键帧并存在于该队列中
     {
         unique_lock<mutex> lock(mMutexNewKFs);
+        //从队列中获得一个等待被插入的关键帧
         mpCurrentKeyFrame = mlNewKeyFrames.front();
         mlNewKeyFrames.pop_front();
     }
 
     // Compute Bags of Words structures
+    //步骤2:计算该关键帧特征点的BOW映射向量
     mpCurrentKeyFrame->ComputeBoW();
 
     // Associate MapPoints to the new keyframe and update normal and descriptor
+    //步骤3:跟踪局部地图过程中新匹配上的MapPoints和当前关键帧绑定
+    //在TrackLocalMap函数中将局部地图中的MapPoints与当前帧进行了匹配,但没有对这些匹配上的MapPoints与当前帧进行关联
     const vector<MapPoint*> vpMapPointMatches = mpCurrentKeyFrame->GetMapPointMatches();
 
     for(size_t i=0; i<vpMapPointMatches.size(); i++)
@@ -146,14 +169,23 @@ void LocalMapping::ProcessNewKeyFrame()
         {
             if(!pMP->isBad())
             {
+                //对于双目或RGBD,会通过updateLastFrame函数临时生成一些MapPoints用于跟踪
+                //但这些MapPoints没有任何属性,和普通3D点一样,主要目的是提高跟踪成功率
+                //感觉这段代码要放在UpdateLastFrame中进行
                 if(!pMP->IsInKeyFrame(mpCurrentKeyFrame))
                 {
+                    //添加观测
                     pMP->AddObservation(mpCurrentKeyFrame, i);
+                    //获得该点的平均观测方向和观测距离范围
                     pMP->UpdateNormalAndDepth();
+                    //加入关键帧后,更新3D点的最佳描述子
                     pMP->ComputeDistinctiveDescriptors();
                 }
                 else // this can only happen for new stereo points inserted by the Tracking
                 {
+                    //将双目或RGBD跟踪过程中新插入的MapPoints放入mlpRecentAddMapPoints,等待检查
+                    //CreateNewMapPoints函数中通过三角化也会生成MapPoints
+                    //这些MapPoints都会经过MapPointsCulling函数的检验
                     mlpRecentAddedMapPoints.push_back(pMP);
                 }
             }
@@ -161,6 +193,7 @@ void LocalMapping::ProcessNewKeyFrame()
     }    
 
     // Update links in the Covisibility Graph
+    //步骤4:更新关键帧的连接关系,Covisibility图和Essential图(tree)
     mpCurrentKeyFrame->UpdateConnections();
 
     // Insert Keyframe in Map
@@ -290,7 +323,7 @@ void LocalMapping::CreateNewMapPoints()
 
             const cv::KeyPoint &kp1 = mpCurrentKeyFrame->mvKeysUn[idx1];
             const float kp1_ur=mpCurrentKeyFrame->mvuRight[idx1];
-            bool bStereo1 = kp1_ur>=0;
+            bool bStereo1 = kp1_ur>=0;//是否是双目或者RGBD
 
             const cv::KeyPoint &kp2 = pKF2->mvKeysUn[idx2];
             const float kp2_ur = pKF2->mvuRight[idx2];
@@ -371,7 +404,7 @@ void LocalMapping::CreateNewMapPoints()
                 float v1 = fy1*y1*invz1+cy1;
                 float errX1 = u1 - kp1.pt.x;
                 float errY1 = v1 - kp1.pt.y;
-                if((errX1*errX1+errY1*errY1)>5.991*sigmaSquare1)
+                if((errX1*errX1+errY1*errY1)>5.991*sigmaSquare1)//这里的参数怎么定的?
                     continue;
             }
             else
@@ -636,18 +669,20 @@ void LocalMapping::KeyFrameCulling()
     // in at least other 3 keyframes (in the same or finer scale)
     // We only consider close stereo points
     vector<KeyFrame*> vpLocalKeyFrames = mpCurrentKeyFrame->GetVectorCovisibleKeyFrames();
-
+    //对所有关键帧进行遍历
     for(vector<KeyFrame*>::iterator vit=vpLocalKeyFrames.begin(), vend=vpLocalKeyFrames.end(); vit!=vend; vit++)
     {
         KeyFrame* pKF = *vit;
         if(pKF->mnId==0)
             continue;
+        //提取每个共视关键帧的MapPoints
         const vector<MapPoint*> vpMapPoints = pKF->GetMapPointMatches();
 
         int nObs = 3;
         const int thObs=nObs;
         int nRedundantObservations=0;
         int nMPs=0;
+        //步骤3:遍历该局部关键帧的MapPoints,判断是否90%以上的MapPoints能被其他关键帧(至少3个观测到
         for(size_t i=0, iend=vpMapPoints.size(); i<iend; i++)
         {
             MapPoint* pMP = vpMapPoints[i];
@@ -657,15 +692,18 @@ void LocalMapping::KeyFrameCulling()
                 {
                     if(!mbMonocular)
                     {
+
                         if(pKF->mvDepth[i]>pKF->mThDepth || pKF->mvDepth[i]<0)
                             continue;
                     }
 
                     nMPs++;
+                    //MapPoints至少被三个关键帧观测到
                     if(pMP->Observations()>thObs)
                     {
                         const int &scaleLevel = pKF->mvKeysUn[i].octave;
                         const map<KeyFrame*, size_t> observations = pMP->GetObservations();
+                        //判断MapPoints是否同时被三个关键帧观测到
                         int nObs=0;
                         for(map<KeyFrame*, size_t>::const_iterator mit=observations.begin(), mend=observations.end(); mit!=mend; mit++)
                         {
@@ -674,13 +712,17 @@ void LocalMapping::KeyFrameCulling()
                                 continue;
                             const int &scaleLeveli = pKFi->mvKeysUn[mit->second].octave;
 
+                            //scale condition
+                            //尺度约束,要求MapPoints在该局部关键帧的特征尺度大于(或近似于)其他关键帧的特征尺度
                             if(scaleLeveli<=scaleLevel+1)
                             {
                                 nObs++;
+                                //已经找到三个同尺度的关键帧可以观测到该MapPoints,不用继续找了
                                 if(nObs>=thObs)
                                     break;
                             }
                         }
+                        //该MapPoints至少被三个关键帧观测到
                         if(nObs>=thObs)
                         {
                             nRedundantObservations++;
@@ -688,8 +730,8 @@ void LocalMapping::KeyFrameCulling()
                     }
                 }
             }
-        }  
-
+        }
+        //步骤4:该局部关键帧90%以上的MapPoints能被其他关键帧(至少三个)观测到,则认为是冗余关键帧
         if(nRedundantObservations>0.9*nMPs)
             pKF->SetBadFlag();
     }

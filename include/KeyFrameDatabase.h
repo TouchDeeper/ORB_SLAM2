@@ -63,7 +63,7 @@ protected:
   const ORBVocabulary* mpVoc;
 
   // Inverted file
-  std::vector<list<KeyFrame*> > mvInvertedFile;
+  std::vector<list<KeyFrame*> > mvInvertedFile;//储存词袋里的单词被观测的情况
 
   // Mutex
   std::mutex mMutex;

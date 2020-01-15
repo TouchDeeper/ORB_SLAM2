@@ -34,9 +34,9 @@ using namespace std;
 namespace ORB_SLAM2
 {
 
-const int ORBmatcher::TH_HIGH = 100;
-const int ORBmatcher::TH_LOW = 50;
-const int ORBmatcher::HISTO_LENGTH = 30;
+const int ORBmatcher::TH_HIGH = 100;//相似变换,描述子匹配阈值
+const int ORBmatcher::TH_LOW = 50;//欧式变换 描述子匹配阈值
+const int ORBmatcher::HISTO_LENGTH = 30;//匹配点对观察方向差的直方图格子数量
 
 ORBmatcher::ORBmatcher(float nnratio, bool checkOri): mfNNratio(nnratio), mbCheckOrientation(checkOri)
 {
@@ -405,15 +405,15 @@ int ORBmatcher::SearchByProjection(KeyFrame* pKF, cv::Mat Scw, const vector<MapP
 int ORBmatcher::SearchForInitialization(Frame &F1, Frame &F2, vector<cv::Point2f> &vbPrevMatched, vector<int> &vnMatches12, int windowSize)
 {
     int nmatches=0;
-    vnMatches12 = vector<int>(F1.mvKeysUn.size(),-1);
+    vnMatches12 = vector<int>(F1.mvKeysUn.size(),-1);//帧1特征点在帧2中的匹配特征点的id
 
     vector<int> rotHist[HISTO_LENGTH];
     for(int i=0;i<HISTO_LENGTH;i++)
-        rotHist[i].reserve(500);
+        rotHist[i].reserve(500);//对每个直方图的格子都预开辟500个数据内存
     const float factor = 1.0f/HISTO_LENGTH;
 
-    vector<int> vMatchedDistance(F2.mvKeysUn.size(),INT_MAX);
-    vector<int> vnMatches21(F2.mvKeysUn.size(),-1);
+    vector<int> vMatchedDistance(F2.mvKeysUn.size(),INT_MAX);//帧2的匹配点对之间的距离
+    vector<int> vnMatches21(F2.mvKeysUn.size(),-1);//帧2特征点在帧1中的匹配特征点的id
 
     for(size_t i1=0, iend1=F1.mvKeysUn.size(); i1<iend1; i1++)
     {
@@ -422,6 +422,7 @@ int ORBmatcher::SearchForInitialization(Frame &F1, Frame &F2, vector<cv::Point2f
         if(level1>0)
             continue;
 
+        //在2图中对应的方块区域寻找图1特征点的候选匹配特征点,返回候选特征点的索引值
         vector<size_t> vIndices2 = F2.GetFeaturesInArea(vbPrevMatched[i1].x,vbPrevMatched[i1].y, windowSize,level1,level1);
 
         if(vIndices2.empty())
@@ -441,7 +442,7 @@ int ORBmatcher::SearchForInitialization(Frame &F1, Frame &F2, vector<cv::Point2f
 
             int dist = DescriptorDistance(d1,d2);
 
-            if(vMatchedDistance[i2]<=dist)
+            if(vMatchedDistance[i2]<=dist)//超过阈值
                 continue;
 
             if(dist<bestDist)
@@ -458,10 +459,12 @@ int ORBmatcher::SearchForInitialization(Frame &F1, Frame &F2, vector<cv::Point2f
 
         if(bestDist<=TH_LOW)
         {
+            //排名第一的候选特征点必须比排名第二的候选特征点的距离小一定程度才算匹配上,保证匹配的鲁棒性
             if(bestDist<(float)bestDist2*mfNNratio)
             {
                 if(vnMatches21[bestIdx2]>=0)
                 {
+                    //为什么就把前面的匹配删除,不应该是比较下两次的误差,误差大的删除吗???
                     vnMatches12[vnMatches21[bestIdx2]]=-1;
                     nmatches--;
                 }
@@ -479,25 +482,31 @@ int ORBmatcher::SearchForInitialization(Frame &F1, Frame &F2, vector<cv::Point2f
                     if(bin==HISTO_LENGTH)
                         bin=0;
                     assert(bin>=0 && bin<HISTO_LENGTH);
-                    rotHist[bin].push_back(i1);
+                    rotHist[bin].push_back(i1);//得到方向直方图
                 }
             }
         }
 
     }
 
+    //利用方向直方图对相差太大的角度的特征匹配进行剔除
     if(mbCheckOrientation)
     {
         int ind1=-1;
         int ind2=-1;
         int ind3=-1;
 
+        //统计直方图最高的三个bin保留,其他范围内的匹配点剔除
+        //另外,若最高的比第二稿的高10倍以上,则只保留最高的bin中的匹配点
+        //若最高的比第三高的高10倍以上,则保留最高的和第二高的bin中的匹配点
         ComputeThreeMaxima(rotHist,HISTO_LENGTH,ind1,ind2,ind3);
 
         for(int i=0; i<HISTO_LENGTH; i++)
         {
+            //不管前三高的bin
             if(i==ind1 || i==ind2 || i==ind3)
                 continue;
+            //先把前三高以外的匹配先剔除了
             for(size_t j=0, jend=rotHist[i].size(); j<jend; j++)
             {
                 int idx1 = rotHist[i][j];
