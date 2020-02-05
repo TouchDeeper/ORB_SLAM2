@@ -28,7 +28,12 @@
 
 namespace ORB_SLAM2
 {
-
+//该类中定义了四叉树创建的函数以及树中结点的属性
+//bool bNoMore： 根据该结点中被分配的特征点的数目来决定是否继续对其进行分割
+//DivisionNode()：实现如何对一个结点进行分割
+//vKeys：用来存储被分配到该结点区域内的所有特征点
+//UL, UR, BL, BR：四个点定义了一个结点的区域
+//lit:list的迭代器，遍历所有生成的节点
 class ExtractorNode
 {
 public:

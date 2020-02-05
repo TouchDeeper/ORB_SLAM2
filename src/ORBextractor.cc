@@ -544,9 +544,12 @@ vector<cv::KeyPoint> ORBextractor::DistributeOctTree(const vector<cv::KeyPoint>&
 {
     // Compute how many initial nodes
     //每个节点是以maxY-minY为边长的正方形格子,计算有多少个根节点
+    //常用的相机kinect v1的分辨率是：640*480 kinect v2的分辨率是：1920*1080
+    //为了尽量使得每一个结点的区域形状接近正方形所以图像的长宽比决定了四叉树根节点的数目
+    //如果使用kinect v1那么只有一个根结点，如果使用kinect v2那么就会有两个根结点
     const int nIni = round(static_cast<float>(maxX-minX)/(maxY-minY));
-
-    const float hX = static_cast<float>(maxX-minX)/nIni;//每个初始节点x方向的间隔
+    //hX is the width between two root node
+    const float hX = static_cast<float>(maxX-minX)/nIni;
 
     list<ExtractorNode> lNodes;
 
@@ -568,7 +571,7 @@ vector<cv::KeyPoint> ORBextractor::DistributeOctTree(const vector<cv::KeyPoint>&
     }
 
     //Associate points to childs
-    //将特征点分配给节点
+    //将vToDistributeKeys按照位置分配在根节点中
     for(size_t i=0;i<vToDistributeKeys.size();i++)
     {
         const cv::KeyPoint &kp = vToDistributeKeys[i];
@@ -578,6 +581,9 @@ vector<cv::KeyPoint> ORBextractor::DistributeOctTree(const vector<cv::KeyPoint>&
     list<ExtractorNode>::iterator lit = lNodes.begin();
 
     //节点清理
+    //现在lNodes中只放有根节点，变量根节点，如果根节点中关键点个数为1
+    //那么将这个节点的bNoMore，表示这个节点不能再分裂了。
+    //如果为空，那么就删除这个节点
     while(lit!=lNodes.end())
     {
         if(lit->vKeys.size()==1)
@@ -590,12 +596,13 @@ vector<cv::KeyPoint> ORBextractor::DistributeOctTree(const vector<cv::KeyPoint>&
         else
             lit++;
     }
-
+    //后面大循环结束标志位
     bool bFinish = false;
 
     int iteration = 0;
 
-    vector<pair<int,ExtractorNode*> > vSizeAndPointerToNode;//每一层子节点及对应包含的特征数
+    //每一层子节点's start iter in lNodes 及对应包含的特征数
+    vector<pair<int,ExtractorNode*> > vSizeAndPointerToNode;
     vSizeAndPointerToNode.reserve(lNodes.size()*4);
 
     while(!bFinish)
@@ -625,6 +632,8 @@ vector<cv::KeyPoint> ORBextractor::DistributeOctTree(const vector<cv::KeyPoint>&
                 // If more than one point, subdivide
                 ExtractorNode n1,n2,n3,n4;
                 //划分子节点,并将节点的特征点分配给子节点
+                //概括来说就是将node which the lit point to分成了四个结点，并且已经完成了特征点的分配，以及特征
+                //个数的检测设定好每个节点的bNoMore的值
                 lit->DivideNode(n1,n2,n3,n4);
 
                 // Add childs if they contain points
@@ -633,6 +642,8 @@ vector<cv::KeyPoint> ORBextractor::DistributeOctTree(const vector<cv::KeyPoint>&
                     lNodes.push_front(n1);                    
                     if(n1.vKeys.size()>1)
                     {
+                        //如果这个新结点中被分配的特征点的个数大于1，那么接下来要被分割的结点的数目
+                        //就得加1了
                         nToExpand++;
                         vSizeAndPointerToNode.push_back(make_pair(n1.vKeys.size(),&lNodes.front()));
                         lNodes.front().lit = lNodes.begin();
@@ -668,8 +679,8 @@ vector<cv::KeyPoint> ORBextractor::DistributeOctTree(const vector<cv::KeyPoint>&
                         lNodes.front().lit = lNodes.begin();
                     }
                 }
-
-                lit=lNodes.erase(lit);//有了子节点就删除节点???
+                // 将此被分裂的节点删除,return the next node's iter
+                lit=lNodes.erase(lit);
                 continue;
             }
         }
@@ -681,17 +692,24 @@ vector<cv::KeyPoint> ORBextractor::DistributeOctTree(const vector<cv::KeyPoint>&
         {
             bFinish = true;
         }
-        else if(((int)lNodes.size()+nToExpand*3)>N)//节点展开次数乘以3用于表明下一次的节点分解可能超过特征点数,即为最后一次分解
+        //如果现在生成的结点全部进行分割后生成的结点满足大于需求的特征点的数目，但是不继续分割又
+        //不能满足大于N的要求时
+        //这里为什么是乘以三，这里也正好印证了上面所说的当一个结点被分割成四个新的结点时，
+        //这个结点时要被删除的，其实总的结点是增加了三个
+        else if(((int)lNodes.size()+nToExpand*3)>N)//节点展开次数乘以3大于N用于表明下一次的节点分解可能超过特征点数,即为最后一次分解
         {
 
             while(!bFinish)
             {
 
                 prevSize = lNodes.size();
-
+                //这里将已经创建好的结点放到一个新的容器中
                 vector<pair<int,ExtractorNode*> > vPrevSizeAndPointerToNode = vSizeAndPointerToNode;
                 vSizeAndPointerToNode.clear();
-
+                //根据结点中被分配到的特征点的数目对结点进行排序
+                //这里为何要排序，我们想要的结果是想让尽可能多的特征点均匀的分布在图像上
+                //如果前面的特征分布相对均匀的节点中的特征点数目已经达到了指标那么就可以将
+                //后面那些分布密集的特征点去掉了。
                 sort(vPrevSizeAndPointerToNode.begin(),vPrevSizeAndPointerToNode.end());
                 for(int j=vPrevSizeAndPointerToNode.size()-1;j>=0;j--)
                 {
@@ -737,7 +755,7 @@ vector<cv::KeyPoint> ORBextractor::DistributeOctTree(const vector<cv::KeyPoint>&
                     }
 
                     lNodes.erase(vPrevSizeAndPointerToNode[j].second->lit);
-
+                    //如果有多的结点还没有被分割完就已经达到了大于N的要求那么就直接跳出循环
                     if((int)lNodes.size()>=N)
                         break;
                 }
@@ -750,7 +768,7 @@ vector<cv::KeyPoint> ORBextractor::DistributeOctTree(const vector<cv::KeyPoint>&
     }
 
     // Retain the best point in each node
-    //保留每个节点下最好的特征点,不是每个节点下只有一个特征点吗???
+    //保留每个节点下响应最大的特征点
     vector<cv::KeyPoint> vResultKeys;
     vResultKeys.reserve(nfeatures);
     for(list<ExtractorNode>::iterator lit=lNodes.begin(); lit!=lNodes.end(); lit++)
@@ -884,7 +902,7 @@ void ORBextractor::ComputeKeyPointsOld(std::vector<std::vector<KeyPoint> > &allK
     for (int level = 0; level < nlevels; ++level)
     {
         const int nDesiredFeatures = mnFeaturesPerLevel[level];
-
+        //初定每个cell有5个特征 levelCols*(levelCols*imageRatio)*5 = nDesiredFeatures
         const int levelCols = sqrt((float)nDesiredFeatures/(5*imageRatio));
         const int levelRows = imageRatio*levelCols;
 
@@ -899,7 +917,7 @@ void ORBextractor::ComputeKeyPointsOld(std::vector<std::vector<KeyPoint> > &allK
         const int cellH = ceil((float)H/levelRows);
 
         const int nCells = levelRows*levelCols;
-        const int nfeaturesCell = ceil((float)nDesiredFeatures/nCells);
+        const int nfeaturesCell = ceil((float)nDesiredFeatures/nCells);//行列参数确定后再重新计算下每个cell分配多少特征
 
         vector<vector<vector<KeyPoint> > > cellKeyPoints(levelRows, vector<vector<KeyPoint> >(levelCols));
 
@@ -1077,7 +1095,7 @@ void ORBextractor::operator()( InputArray _image, InputArray _mask, vector<KeyPo
 
     vector < vector<KeyPoint> > allKeypoints;
     ComputeKeyPointsOctTree(allKeypoints);
-    //ComputeKeyPointsOld(allKeypoints);
+//    ComputeKeyPointsOld(allKeypoints);
 
     Mat descriptors;
 
