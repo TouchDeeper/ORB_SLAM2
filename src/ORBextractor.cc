@@ -807,7 +807,7 @@ void ORBextractor::ComputeKeyPointsOctTree(vector<vector<KeyPoint> >& allKeypoin
         const int maxBorderX = mvImagePyramid[level].cols-EDGE_THRESHOLD+3;
         const int maxBorderY = mvImagePyramid[level].rows-EDGE_THRESHOLD+3;
 
-        //每一层上用于分配到四叉树的特征点点
+        //每一层上用于分配到四叉树的特征点
         vector<cv::KeyPoint> vToDistributeKeys;
         vToDistributeKeys.reserve(nfeatures*10);
 
@@ -1083,7 +1083,7 @@ static void computeDescriptors(const Mat& image, vector<KeyPoint>& keypoints, Ma
 
 void ORBextractor::operator()( InputArray _image, InputArray _mask, vector<KeyPoint>& _keypoints,
                       OutputArray _descriptors)
-{ 
+{
     if(_image.empty())
         return;
 
@@ -1144,29 +1144,66 @@ void ORBextractor::operator()( InputArray _image, InputArray _mask, vector<KeyPo
         _keypoints.insert(_keypoints.end(), keypoints.begin(), keypoints.end());
     }
 }
-//计算图像金字塔
+
+//void ORBextractor::operator()( InputArray _image, InputArray _mask, vector<KeyPoint>& _keypoints,
+//                               OutputArray _descriptors)
+//{
+//    if(_image.empty())
+//        return;
+//
+//    Mat image = _image.getMat();
+//    assert(image.type() == CV_8UC1 );
+//    Ptr<ORB> orb = ORB::create (nfeatures, float(scaleFactor), nlevels, EDGE_THRESHOLD, 0, 2, ORB::FAST_SCORE,PATCH_SIZE,iniThFAST );
+//    orb->detectAndCompute(image,_mask,_keypoints,_descriptors);
+//}
+
+//建立图像金字塔
+//将原始图像一级级缩小并依次存在mvImagePyramid里
+//生成mvImagePyramid[i]的图片的方法是：
+//    先用resize()将图片缩放至sz大小，放入 mvImagePyramid[i]；
+//    接着用copyMakeBorder()扩展边界至wholeSize大小放入temp；
+//    注意temp和mvImagePyramid[i]公用相同数据区，改变temp会改变mvImagePyramid[i]
 void ORBextractor::ComputePyramid(cv::Mat image)
 {
+    // 计算n个level尺度的图片
     for (int level = 0; level < nlevels; ++level)
     {
+        //获取缩放尺度
         float scale = mvInvScaleFactor[level];
+        //当前层图片尺寸
         Size sz(cvRound((float)image.cols*scale), cvRound((float)image.rows*scale));
+        //包含的EDGE_THRESHOLD的图片尺寸
         Size wholeSize(sz.width + EDGE_THRESHOLD*2, sz.height + EDGE_THRESHOLD*2);
+        //新建一个temp，大小为wholeSize
         Mat temp(wholeSize, image.type()), masktemp;
+        //从temp裁剪（起点为EDGE_THRESHOLD, EDGE_THRESHOLD，大小为sz.width,
+        //sz.height）存入mvImagePyramid[level]
         mvImagePyramid[level] = temp(Rect(EDGE_THRESHOLD, EDGE_THRESHOLD, sz.width, sz.height));
 
         // Compute the resized image
         if( level != 0 )
         {
+            //从上一级图像mvImagePyramid[level-1]中缩小图像至sz大小，
+            //并存入mvImagePyramid[level]
             resize(mvImagePyramid[level-1], mvImagePyramid[level], sz, 0, 0, INTER_LINEAR);
-
+            //扩充上下左右边界EDGE_THRESHOLD个像素，放入temp中,这些拓展的像素不会对mvImagePyramid造成影响
+            //因为mvImagePyramid[i]只是temp(Rect(EDGE_THRESHOLD, EDGE_THRESHOLD, sz.width, sz.height))的引用
             copyMakeBorder(mvImagePyramid[level], temp, EDGE_THRESHOLD, EDGE_THRESHOLD, EDGE_THRESHOLD, EDGE_THRESHOLD,
                            BORDER_REFLECT_101+BORDER_ISOLATED);            
         }
         else
         {
+            //需要扩充上下左右边界EDGE_THRESHOLD个像素，放入temp中
             copyMakeBorder(image, temp, EDGE_THRESHOLD, EDGE_THRESHOLD, EDGE_THRESHOLD, EDGE_THRESHOLD,
-                           BORDER_REFLECT_101);            
+                           BORDER_REFLECT_101);
+            /*
+             Various border types, image boundaries are denoted with '|'
+             * BORDER_REPLICATE:     aaaaaa|abcdefgh|hhhhhhh
+             * BORDER_REFLECT:       fedcba|abcdefgh|hgfedcb
+             * BORDER_REFLECT_101:   gfedcb|abcdefgh|gfedcba
+             * BORDER_WRAP:          cdefgh|abcdefgh|abcdefg
+             * BORDER_CONSTANT:      iiiiii|abcdefgh|iiiiiii  with some specified 'i'
+             */
         }
     }
 

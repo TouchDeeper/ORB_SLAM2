@@ -1333,7 +1333,11 @@ int ORBmatcher::SearchBySim3(KeyFrame *pKF1, KeyFrame *pKF2, vector<MapPoint*> &
 
     return nFound;
 }
-
+/**
+ * 根据投影来进行搜索，用于匹配前后两帧
+ * 1.先计算上一帧中的地图点MapPoint在当前帧对应的像素坐标，也就是由3D点到2D点的投影；
+ * 2.利用计算所得的像素坐标以及描述子和当前帧的像素坐标进行匹配；
+*/
 int ORBmatcher::SearchByProjection(Frame &CurrentFrame, const Frame &LastFrame, const float th, const bool bMono)
 {
     int nmatches = 0;
@@ -1343,20 +1347,20 @@ int ORBmatcher::SearchByProjection(Frame &CurrentFrame, const Frame &LastFrame, 
     for(int i=0;i<HISTO_LENGTH;i++)
         rotHist[i].reserve(500);
     const float factor = 1.0f/HISTO_LENGTH;
-
+    //获取当前帧的旋转和平移向量
     const cv::Mat Rcw = CurrentFrame.mTcw.rowRange(0,3).colRange(0,3);
     const cv::Mat tcw = CurrentFrame.mTcw.rowRange(0,3).col(3);
 
     const cv::Mat twc = -Rcw.t()*tcw;
-
+    //获取上一帧的旋转矩阵和平移向量
     const cv::Mat Rlw = LastFrame.mTcw.rowRange(0,3).colRange(0,3);
     const cv::Mat tlw = LastFrame.mTcw.rowRange(0,3).col(3);
 
     const cv::Mat tlc = Rlw*twc+tlw;
-
+    // 根据沿相机z轴的运动情况来判断在金字塔中是正向搜索还是逆向搜索
     const bool bForward = tlc.at<float>(2)>CurrentFrame.mb && !bMono;
     const bool bBackward = -tlc.at<float>(2)>CurrentFrame.mb && !bMono;
-
+    //遍历上一帧中的MapPoint点
     for(int i=0; i<LastFrame.N; i++)
     {
         MapPoint* pMP = LastFrame.mvpMapPoints[i];
@@ -1366,7 +1370,14 @@ int ORBmatcher::SearchByProjection(Frame &CurrentFrame, const Frame &LastFrame, 
             if(!LastFrame.mvbOutlier[i])
             {
                 // Project
+                /**
+                * 以下是三维世界中的MapPoint点到像素坐标的计算过程
+                * 1.世界坐标-->相机坐标；
+                * 2.相机坐标-->相机归一化平面坐标；
+                * 3.相机归一化平面坐标-->像素坐标；
+               */
                 cv::Mat x3Dw = pMP->GetWorldPos();
+                //1.计算了MapPoint在相机坐标系中的坐标值
                 cv::Mat x3Dc = Rcw*x3Dw+tcw;
 
                 const float xc = x3Dc.at<float>(0);
@@ -1375,7 +1386,14 @@ int ORBmatcher::SearchByProjection(Frame &CurrentFrame, const Frame &LastFrame, 
 
                 if(invzc<0)
                     continue;
-
+                /**
+                 * X/Z = X * 1/Z = xc * invzc
+                 * Y/Z = Y * 1/Z = yc * invzc
+                 * u,v的计算公式如下：
+                 * u = fx * X/Z + cx
+                 * v = fy * Y/Z + cy
+                */
+                //2.下面的xc*invzc和yc*invzc就是归一化平面的x,y坐标；计算所得u,v为像素坐标
                 float u = CurrentFrame.fx*xc*invzc+CurrentFrame.cx;
                 float v = CurrentFrame.fy*yc*invzc+CurrentFrame.cy;
 
@@ -1383,14 +1401,16 @@ int ORBmatcher::SearchByProjection(Frame &CurrentFrame, const Frame &LastFrame, 
                     continue;
                 if(v<CurrentFrame.mnMinY || v>CurrentFrame.mnMaxY)
                     continue;
-
+                //octave就是该关键点所在金字塔中哪个层
                 int nLastOctave = LastFrame.mvKeys[i].octave;
 
                 // Search in a window. Size depends on scale
                 float radius = th*CurrentFrame.mvScaleFactors[nLastOctave];
 
                 vector<size_t> vIndices2;
-
+                // 正向，与场景变近了，那就搜索更近的层，即往层数高的搜索
+                // 逆向，与正向相反
+                // 对于单目的一直是在附近层搜索
                 if(bForward)
                     vIndices2 = CurrentFrame.GetFeaturesInArea(u,v, radius, nLastOctave);
                 else if(bBackward)
@@ -1400,12 +1420,12 @@ int ORBmatcher::SearchByProjection(Frame &CurrentFrame, const Frame &LastFrame, 
 
                 if(vIndices2.empty())
                     continue;
-
+                //获得该MapPoint的描述子
                 const cv::Mat dMP = pMP->GetDescriptor();
 
                 int bestDist = 256;
                 int bestIdx2 = -1;
-
+                //遍历vIndices2，筛选出与pMP最匹配的特征点
                 for(vector<size_t>::const_iterator vit=vIndices2.begin(), vend=vIndices2.end(); vit!=vend; vit++)
                 {
                     const size_t i2 = *vit;
@@ -1454,6 +1474,7 @@ int ORBmatcher::SearchByProjection(Frame &CurrentFrame, const Frame &LastFrame, 
     }
 
     //Apply rotation consistency
+    //剔除方向不符合的匹配点
     if(mbCheckOrientation)
     {
         int ind1=-1;
