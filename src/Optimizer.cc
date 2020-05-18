@@ -130,7 +130,7 @@ void Optimizer::BundleAdjustment(const vector<KeyFrame *> &vpKFs, const vector<M
 
         int nEdges = 0;
         //SET EDGES
-        // 步骤3：向优化器添加投影边边
+        // 步骤3：向优化器添加投影边
         for(map<KeyFrame*,size_t>::const_iterator mit=observations.begin(); mit!=observations.end(); mit++)
         {
 
