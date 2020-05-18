@@ -177,7 +177,11 @@ void Initializer::FindHomography(vector<bool> &vbMatchesInliers, float &score, c
     }
 }
 
-
+/**
+ * @brief 计算基础矩阵
+ *
+ * 假设场景为非平面情况下通过前两帧求取Fundamental矩阵(current frame 2 到 reference frame 1),并得到该模型的评分
+ */
 void Initializer::FindFundamental(vector<bool> &vbMatchesInliers, float &score, cv::Mat &F21)
 {
     // Number of putative matches
@@ -216,7 +220,7 @@ void Initializer::FindFundamental(vector<bool> &vbMatchesInliers, float &score, 
         cv::Mat Fn = ComputeF21(vPn1i,vPn2i);
 
         F21i = T2t*Fn*T1;
-
+        // 利用重投影误差为当次RANSAC的结果评分
         currentScore = CheckFundamental(F21i, vbCurrentInliers, mSigma);
 
         if(currentScore>score)
